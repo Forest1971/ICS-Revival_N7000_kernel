@@ -1,0 +1,1 @@
+#define UTS_RELEASE "3.0.31-1103517_ICS_Revival_V1_OC"

@@ -1,0 +1,395 @@
+diff -urNp Kernel/arch/arm/mach-exynos/asv-4210.c maxfu/arch/arm/mach-exynos/asv-4210.c
+--- Kernel/arch/arm/mach-exynos/asv-4210.c	2013-02-20 19:36:09.000000000 +0700
++++ maxfu/arch/arm/mach-exynos/asv-4210.c	2014-02-27 22:48:25.890289000 +0700
+@@ -391,6 +391,44 @@ static int exynos4210_get_ids(struct sam
+ #define PACK_ID				8
+ #define PACK_MASK			0x3
+ 
++static char r_str[64];                                                                                                                                                                                                   
++static unsigned int asv_v;                                                                                                                                                                                      
++#ifdef CONFIG_EXYNOS4_SETUP_THERMAL
++extern int get_exynos4_temp(void); 
++#endif
++#ifdef CONFIG_SEC_THERMISTOR
++extern int u1_adc_temp_getvalue(void);
++#endif
++
++//collect CPU and temp info, by PHJZ @ xda, modified by G.Lewarne @ xda
++extern unsigned int  get_exynos4210_overclock(void);
++char *show_asv(void) {                                                                                                                                                                                                   
++ char *gr="SABCD567";
++ int f, i=(samsung_cpu_id >> PACK_ID) & PACK_MASK, pkg=(asv_v>>16) & 7, hpm=(asv_v>>8)&0xff, ids=asv_v&0xff, ov=(get_exynos4210_overclock()/1000)-1000;                                                                                                                                                                                             
++ switch ((exynos_result_of_asv>>SUPPORT_FREQ_SHIFT)&SUPPORT_FREQ_MASK) {                                                                                                                                                                                            
++  case 1: f=0;
++  case 2: f=2; break;                                                                                                                                                                                                    
++  case 4: f=4; break;                                                                                                                                                                                                    
++  default: f=1111; break;                                                                                                                                                                                                   
++ }                                                                                                                                                                                                                       
++#ifdef CONFIG_SEC_THERMISTOR
++{ int t=u1_adc_temp_getvalue();
++#ifdef CONFIG_EXYNOS4_SETUP_THERMAL
++ sprintf(r_str,"( Max 1.%d GHz VoltGroup:%c CPU:%dc BOARD:%dc )",ov,*(gr+(exynos_result_of_asv&7)),get_exynos4_temp(),t/10);                                                                                                    
++#else
++ sprintf(r_str,"( Freq 1.%d GHz [%d,%d] VoltGroup:%c [%d,%d] BOARD: %d.%dc )",ov,i,pkg,*(gr+(exynos_result_of_asv&7)),hpm,ids,t/10,t%10);                                                                                                   
++#endif
++ }
++#else
++#ifdef CONFIG_EXYNOS4_SETUP_THERMAL
++ sprintf(r_str,"( CPU 1.%d/1.%dGHz [%d,%d] VG:%c [%d,%d] CPU: %dC )",i,pkg,f,ov,*(gr+(exynos_result_of_asv&7)),hpm,ids,get_exynos4_temp());                                                                                                    
++#else
++ sprintf(r_str,"( CPU 1.%d/1.%dGHz [%d,%d] VG:%c [%d,%d] )",i,pkg,f,ov,*(gr+(exynos_result_of_asv&7)),hpm,ids);                                                                                           
++#endif
++#endif
++ return r_str;                                                                                                                                                                                                           
++}
++
+ static int exynos4210_asv_store_result(struct samsung_asv *asv_info)
+ {
+ 	unsigned int result_grp;
+diff -urNp Kernel/arch/arm/mach-exynos/busfreq.c maxfu/arch/arm/mach-exynos/busfreq.c
+--- Kernel/arch/arm/mach-exynos/busfreq.c	2013-02-20 19:36:09.000000000 +0700
++++ maxfu/arch/arm/mach-exynos/busfreq.c	2014-02-27 22:48:25.127245000 +0700
+@@ -47,7 +47,7 @@
+ 
+ #define MAX_LOAD		100
+ #define DIVIDING_FACTOR		10000
+-#define UP_THRESHOLD_DEFAULT	23
++#define UP_THRESHOLD_DEFAULT	15
+ 
+ #define SYSFS_DEBUG_BUSFREQ
+ 
+@@ -102,11 +102,11 @@ struct busfreq_table {
+ };
+ 
+ static struct busfreq_table exynos4_busfreq_table[] = {
+-	{LV_0, 400000, 1100000, 0, 0},
+-	{LV_1, 267000, 1000000, 0, 0},
++	{LV_0, 400000, 975000, 0, 0},
++	{LV_1, 267000, 925000, 0, 0},
+ #ifdef CONFIG_BUSFREQ_L2_160M
+ 	/*L2: 160MHz */
+-	{LV_2, 160000, 1000000, 0, 0},
++	{LV_2, 160000, 900000, 0, 0},
+ #else
+ 	/* L2: 133MHz */
+ 	{LV_2, 133000, 950000, 0, 0},
+diff -urNp Kernel/arch/arm/mach-exynos/cpufreq-4210.c maxfu/arch/arm/mach-exynos/cpufreq-4210.c
+--- Kernel/arch/arm/mach-exynos/cpufreq-4210.c	2013-02-20 19:36:09.000000000 +0700
++++ maxfu/arch/arm/mach-exynos/cpufreq-4210.c	2014-02-27 22:48:11.453463000 +0700
+@@ -24,7 +24,7 @@
+ 
+ #include <plat/clock.h>
+ 
+-#define CPUFREQ_LEVEL_END	L6
++#define CPUFREQ_LEVEL_END	L8
+ 
+ static int max_support_idx;
+ static int min_support_idx = (CPUFREQ_LEVEL_END - 1);
+@@ -41,12 +41,14 @@ struct cpufreq_clkdiv {
+ static unsigned int exynos4210_volt_table[CPUFREQ_LEVEL_END];
+ 
+ static struct cpufreq_frequency_table exynos4210_freq_table[] = {
+-	{L0, 1400*1000},
+-	{L1, 1200*1000},
+-	{L2, 1000*1000},
+-	{L3, 800*1000},
+-	{L4, 500*1000},
+-	{L5, 200*1000},
++	{L0, 1600*1000},
++	{L1, 1400*1000},
++	{L2, 1200*1000},
++	{L3, 1000*1000},
++	{L4, 800*1000},
++	{L5, 500*1000},
++	{L6, 200*1000},
++	{L7, 100*1000},
+ 	{0, CPUFREQ_TABLE_END},
+ };
+ 
+@@ -57,6 +59,8 @@ static struct cpufreq_clkdiv exynos4210_
+ 	{L3, 0},
+ 	{L4, 0},
+ 	{L5, 0},
++	{L6, 0},
++	{L7, 0},
+ };
+ 
+ static unsigned int clkdiv_cpu0[CPUFREQ_LEVEL_END][7] = {
+@@ -65,22 +69,28 @@ static unsigned int clkdiv_cpu0[CPUFREQ_
+ 	 * { DIVCORE, DIVCOREM0, DIVCOREM1, DIVPERIPH,
+ 	 *		DIVATB, DIVPCLK_DBG, DIVAPLL }
+ 	 */
+-	/* ARM L0: 1400MHz */
++	/* ARM L0: 1600MHz */
++	{ 0, 3, 7, 3, 4, 1, 7 },
++	
++	/* ARM L1: 1400MHz */
+ 	{ 0, 3, 7, 3, 4, 1, 7 },
+ 
+-	/* ARM L1: 1200MHz */
++	/* ARM L2: 1200MHz */
+ 	{ 0, 3, 7, 3, 4, 1, 7 },
+ 
+-	/* ARM L2: 1000MHz */
++	/* ARM L3: 1000MHz */
+ 	{ 0, 3, 7, 3, 4, 1, 7 },
+ 
+-	/* ARM L3: 800MHz */
++	/* ARM L4: 800MHz */
+ 	{ 0, 3, 7, 3, 3, 1, 7 },
+ 
+-	/* ARM L4: 500MHz */
++	/* ARM L5: 500MHz */
+ 	{ 0, 3, 7, 3, 3, 1, 7 },
+ 
+-	/* ARM L5: 200MHz */
++	/* ARM L6: 200MHz */
++	{ 0, 1, 3, 1, 3, 1, 0 },
++	
++	/* ARM L7: 100MHz */
+ 	{ 0, 1, 3, 1, 3, 1, 0 },
+ };
+ 
+@@ -88,43 +98,55 @@ static unsigned int clkdiv_cpu1[CPUFREQ_
+ 	/* Clock divider value for following
+ 	 * { DIVCOPY, DIVHPM }
+ 	 */
+-	/* ARM L0: 1400MHz */
++	/* ARM L0: 1600MHz */
++	{ 5, 0 },
++	
++	/* ARM L1: 1400MHz */
+ 	{ 5, 0 },
+ 
+-	/* ARM L1: 1200MHz */
++	/* ARM L2: 1200MHz */
+ 	{ 5, 0 },
+ 
+-	/* ARM L2: 1000MHz */
++	/* ARM L3: 1000MHz */
+ 	{ 4, 0 },
+ 
+-	/* ARM L3: 800MHz */
++	/* ARM L4: 800MHz */
+ 	{ 3, 0 },
+ 
+-	/* ARM L4: 500MHz */
++	/* ARM L5: 500MHz */
+ 	{ 3, 0 },
+ 
+-	/* ARM L5: 200MHz */
++	/* ARM L6: 200MHz */
++	{ 3, 0 },
++	
++	/* ARM L7: 200MHz */
+ 	{ 3, 0 },
+ };
+ 
+ static unsigned int exynos4_apll_pms_table[CPUFREQ_LEVEL_END] = {
+-	/* APLL FOUT L0: 1400MHz */
++	/* APLL FOUT L0: 1600MHz */
++	((400<<16)|(6<<8)|(0x1)),
++  
++	/* APLL FOUT L1: 1400MHz */
+ 	((350<<16)|(6<<8)|(0x1)),
+ 
+-	/* APLL FOUT L1: 1200MHz */
++	/* APLL FOUT L2: 1200MHz */
+ 	((150<<16)|(3<<8)|(0x1)),
+ 
+-	/* APLL FOUT L2: 1000MHz */
++	/* APLL FOUT L3: 1000MHz */
+ 	((250<<16)|(6<<8)|(0x1)),
+ 
+-	/* APLL FOUT L3: 800MHz */
++	/* APLL FOUT L4: 800MHz */
+ 	((200<<16)|(6<<8)|(0x1)),
+ 
+-	/* APLL FOUT L4: 500MHz */
++	/* APLL FOUT L5: 500MHz */
+ 	((250<<16)|(6<<8)|(0x2)),
+ 
+-	/* APLL FOUT L5: 200MHz */
++	/* APLL FOUT L6: 200MHz */
+ 	((200<<16)|(6<<8)|(0x3)),
++	
++	/* APLL FOUT L6: 200MHz */
++	((100<<16)|(6<<8)|(0x3)),
+ };
+ 
+ /*
+@@ -135,40 +157,58 @@ static const unsigned int asv_voltage_A[
+ 	/*
+ 	 *	   SS, A1, A2, B1, B2, C1, C2, D
+ 	 * @Dummy:
++	 * @1600 :
++	 * @1400 :
+ 	 * @1200 :
+ 	 * @1000 :
+ 	 * @800	 :	ASV_VOLTAGE_TABLE
+ 	 * @500  :
+ 	 * @200  :
++	 * @100  :
+ 	 */
++	/* for Dummy:
+ 	{ 0, 0, 0, 0, 0, 0, 0, 0 },
+-	{ 1350000, 1350000, 1300000, 1275000, 1250000, 1225000, 1200000, 1175000 },
+-	{ 1300000, 1250000, 1200000, 1175000, 1150000, 1125000, 1100000, 1075000 },
+-	{ 1200000, 1150000, 1100000, 1075000, 1050000, 1025000, 1000000, 975000 },
+-	{ 1100000, 1050000, 1000000, 975000, 975000, 950000, 925000, 925000 },
+-	{ 1050000, 1000000, 975000, 950000, 950000, 925000, 925000, 925000 },
+-
++	 */
++	{ 1350000, 1375000, 1375000, 1325000, 1325000, 1325000, 1325000, 1175000 },
++	{ 1350000, 1350000, 1350000, 1225000, 1225000, 1225000, 1225000, 1175000 },
++	{ 1350000, 1275000, 1275000, 1150000, 1150000, 1150000, 1150000, 1175000 },
++	{ 1300000, 1175000, 1175000, 1050000, 1050000, 1050000, 1050000, 1075000 },
++	{ 1200000, 1100000, 1100000, 1000000, 1000000, 1000000, 1000000, 975000 },
++	{ 1100000, 1000000, 1000000, 925000, 925000, 925000, 925000, 925000 },
++	{ 1050000, 900000, 900000, 900000, 900000, 900000, 900000, 900000 },
++	{ 1050000, 900000, 900000, 900000, 900000, 900000, 900000, 900000 },
+ };
+ 
+ static const unsigned int asv_voltage_B[CPUFREQ_LEVEL_END][5] = {
+ 	/*
+ 	 *	   S, A, B, C, D
++	 * @1600 :
+ 	 * @1400 :
+ 	 * @1200 :
+ 	 * @1000 :
+ 	 * @800	 :	ASV_VOLTAGE_TABLE
+ 	 * @500	 :
+ 	 * @200	 :
++	 * @100  :
+ 	 */
+-	{ 1350000, 1350000, 1300000, 1250000, 1225000 },
+-	{ 1325000, 1275000, 1225000, 1175000, 1150000 },
+-	{ 1225000, 1175000, 1125000, 1075000, 1050000 },
+-	{ 1150000, 1100000, 1050000, 1000000, 975000 },
+-	{ 1050000, 1000000, 950000, 950000, 950000 },
+-	{ 1025000, 975000, 950000, 950000, 950000 },
++	{ 1325000, 1375000, 1325000, 1325000, 1225000 },
++	{ 1225000, 1350000, 1225000, 1225000, 1225000 },
++	{ 1150000, 1275000, 1150000, 1150000, 1150000 },
++	{ 1050000, 1175000, 1050000, 1050000, 1050000 },
++	{ 1000000, 1100000, 1000000, 1000000, 975000 },
++	{ 1000000, 1000000, 925000, 925000, 950000 },
++	{ 900000, 900000, 900000, 900000, 950000 },
++	{ 900000, 900000, 900000, 900000, 950000 },
+ 
+ };
+ 
++ 
++unsigned int get_exynos4210_overclock( void) {
++    return exynos4210_freq_table[max_support_idx].frequency;
++}
++EXPORT_SYMBOL( get_exynos4210_overclock);
++
++
+ static void set_clkdiv(unsigned int div_index)
+ {
+ 	unsigned int tmp;
+@@ -425,8 +465,8 @@ int exynos4210_cpufreq_init(struct exyno
+ 	}
+ 
+ 	info->mpll_freq_khz = rate;
+-	info->pm_lock_idx = L3;
+-	info->pll_safe_idx = L2;
++	info->pm_lock_idx = L4;
++	info->pll_safe_idx = L3;
+ 	info->max_support_idx = max_support_idx;
+ 	info->min_support_idx = min_support_idx;
+ 	info->cpu_clk = cpu_clk;
+diff -urNp Kernel/arch/arm/mach-exynos/cpufreq.c maxfu/arch/arm/mach-exynos/cpufreq.c
+--- Kernel/arch/arm/mach-exynos/cpufreq.c	2013-02-20 19:36:09.000000000 +0700
++++ maxfu/arch/arm/mach-exynos/cpufreq.c	2014-02-27 22:48:11.798483000 +0700
+@@ -714,7 +714,7 @@ static int exynos_cpufreq_cpu_init(struc
+ 	cpufreq_frequency_table_get_attr(exynos_info->freq_table, policy->cpu);
+ 
+ 	/* set the transition latency value */
+-	policy->cpuinfo.transition_latency = 100000;
++	policy->cpuinfo.transition_latency = 10000;
+ 
+ 	/*
+ 	 * EXYNOS4 multi-core processors has 2 cores
+diff -urNp Kernel/arch/arm/mach-exynos/Kconfig maxfu/arch/arm/mach-exynos/Kconfig
+--- Kernel/arch/arm/mach-exynos/Kconfig	2013-02-21 11:36:28.000000000 +0700
++++ maxfu/arch/arm/mach-exynos/Kconfig	2014-02-27 22:48:26.434320000 +0700
+@@ -880,9 +880,6 @@ config MACH_Q1_BD
+ 	bool "Q1 Board"
+ 
+ endchoice
+-config TARGET_LOCALE_NAATT_TEMP
+-        bool "Support North America GSM ATT Board"
+-        default n
+ 
+ config MACH_PX
+ 	bool "PX board"
+diff -urNp Kernel/arch/arm/mach-exynos/Makefile maxfu/arch/arm/mach-exynos/Makefile
+--- Kernel/arch/arm/mach-exynos/Makefile	2013-02-20 19:36:09.000000000 +0700
++++ maxfu/arch/arm/mach-exynos/Makefile	2014-02-27 22:48:11.473464000 +0700
+@@ -29,8 +29,14 @@ AFLAGS_sleep-exynos4.o :=$(call as-instr
+ 
+ obj-$(CONFIG_EXYNOS5_PM)	+= pm-exynos5.o sleep-exynos5.o
+ obj-$(CONFIG_CPU_FREQ)		+= cpufreq.o
+-obj-$(CONFIG_EXYNOS4_CPUFREQ)	+= asv.o asv-4210.o asv-4x12.o
+-obj-$(CONFIG_EXYNOS4_CPUFREQ)	+= cpufreq-4210.o cpufreq-4x12.o
++obj-$(CONFIG_EXYNOS4_CPUFREQ)	+= asv.o
++ifeq ($(CONFIG_CPU_EXYNOS4210),y)
++obj-$(CONFIG_EXYNOS4_CPUFREQ)	+= asv-4210.o
++obj-$(CONFIG_EXYNOS4_CPUFREQ)	+= cpufreq-4210.o
++else
++obj-$(CONFIG_EXYNOS4_CPUFREQ)	+= asv-4x12.o
++obj-$(CONFIG_EXYNOS4_CPUFREQ)	+= cpufreq-4x12.o
++endif
+ obj-$(CONFIG_EXYNOS5_CPUFREQ)	+= asv.o asv-5250.o
+ obj-$(CONFIG_EXYNOS5_CPUFREQ)	+= cpufreq-5250.o
+ obj-$(CONFIG_EXYNOS4_CPUIDLE)	+= cpuidle-exynos4.o idle-exynos4.o
+diff -urNp Kernel/arch/arm/mach-exynos/sec_thermistor.c maxfu/arch/arm/mach-exynos/sec_thermistor.c
+--- Kernel/arch/arm/mach-exynos/sec_thermistor.c	2013-02-20 19:36:09.000000000 +0700
++++ maxfu/arch/arm/mach-exynos/sec_thermistor.c	2014-02-27 22:48:11.443462000 +0700
+@@ -140,6 +140,10 @@ err:
+ 	return err_value;
+ }
+ 
++static int u1_adc_temp;
++int u1_adc_temp_getvalue(void) { return u1_adc_temp; }
++EXPORT_SYMBOL(u1_adc_temp_getvalue);
++
+ static int convert_adc_to_temper(struct sec_therm_info *info, unsigned int adc)
+ {
+ 	int low = 0;
+@@ -162,7 +166,7 @@ static int convert_adc_to_temper(struct
+ 		else
+ 			break;
+ 	}
+-	return info->pdata->adc_table[mid].temperature;
++	return u1_adc_temp=info->pdata->adc_table[mid].temperature;
+ }
+ 
+ static void notify_change_of_temperature(struct sec_therm_info *info)
+ 
+diff -urNp Kernel/arch/arm/mach-exynos/tmu.c maxfu/arch/arm/mach-exynos/tmu.c
+--- Kernel/arch/arm/mach-exynos/tmu.c	2013-02-20 19:36:09.000000000 +0700
++++ maxfu/arch/arm/mach-exynos/tmu.c	2014-02-27 22:48:25.932291000 +0700
+@@ -76,6 +76,10 @@ extern int mali_voltage_lock_pop(void);
+ #define CONFIG_TC_VOLTAGE /* Temperature compensated voltage */
+ #endif
+ 
++static int real_tmu_temp;                                                                                                                                                                                                
++int get_exynos4_temp(void) { return real_tmu_temp; }                                                                                                                                                                    
++EXPORT_SYMBOL(get_exynos4_temp);
++
+ static unsigned int get_curr_temp(struct s5p_tmu_info *info)
+ {
+ 	unsigned char curr_temp_code;
+@@ -107,7 +111,7 @@ static unsigned int get_curr_temp(struct
+ 			"or surrounding temp is low.\n");
+ 
+ 	/* compensate and calculate current temperature */
+-	temperature = curr_temp_code - info->te1 + TMU_DC_VALUE;
++	real_tmu_temp=temperature = curr_temp_code - info->te1 + TMU_DC_VALUE;
+ 	if (temperature < 0) {
+ 		/* if temperature lower than 0 degree, set 0 degree */
+ 		pr_info("current temp is %d celsius degree.\n"
+
